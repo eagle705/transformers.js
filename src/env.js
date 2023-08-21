@@ -38,14 +38,15 @@ const WEB_CACHE_AVAILABLE = typeof self !== 'undefined' && 'caches' in self;
 const FS_AVAILABLE = !isEmpty(fs) || IS_REACT_NATIVE; // check if file system is available
 const PATH_AVAILABLE = !isEmpty(path); // check if path is available
 
+__dirname = fs.DocumentDirectoryPath;
 const RUNNING_LOCALLY = FS_AVAILABLE && PATH_AVAILABLE;
 
-let __dirname = './';
-if (IS_REACT_NATIVE) {
-    __dirname = fs.DocumentDirectoryPath;
-} else if (RUNNING_LOCALLY) {
-    __dirname = path.dirname(path.dirname(url.fileURLToPath(import.meta.url)));
-}
+// let __dirname = './';
+// if (IS_REACT_NATIVE) {
+//     __dirname = fs.DocumentDirectoryPath;
+// } else if (RUNNING_LOCALLY) {
+//     __dirname = path.dirname(path.dirname(url.fileURLToPath(import.meta.url)));
+// }
 
 // Only used for environments with access to file system
 const DEFAULT_CACHE_DIR = RUNNING_LOCALLY
@@ -134,4 +135,3 @@ export const env = {
 function isEmpty(obj) {
     return Object.keys(obj).length === 0;
 }
-
