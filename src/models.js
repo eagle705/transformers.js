@@ -105,9 +105,11 @@ class DecoderOnlyModelType extends ModelType { };
 //////////////////////////////////////////////////
 // Helper functions
 
-// Will be populated later
-const MODEL_TYPE_MAPPING = new Map();
-const MODEL_CLASS_MAPPING = new Map();
+// Will be populated fully later
+const MODEL_TYPE_MAPPING = new Map([
+    ['CLIPTextModelWithProjection', EncoderOnlyModelType],
+    ['CLIPVisionModelWithProjection', EncoderOnlyModelType],
+]);
 
 /**
  * Helper function to determine which `forward` method to run for a specific model.
@@ -638,6 +640,7 @@ export class PreTrainedModel extends Callable {
         cache_dir = null,
         local_files_only = false,
         revision = 'main',
+        model_file_name = null,
     } = {}) {
 
         let options = {
@@ -647,6 +650,7 @@ export class PreTrainedModel extends Callable {
             cache_dir,
             local_files_only,
             revision,
+            model_file_name,
         }
 
         let modelType = MODEL_TYPE_MAPPING.get(this.name);
@@ -655,7 +659,7 @@ export class PreTrainedModel extends Callable {
         if (modelType === DecoderOnlyModelType) {
             info = await Promise.all([
                 AutoConfig.from_pretrained(pretrained_model_name_or_path, options),
-                constructSession(pretrained_model_name_or_path, 'decoder_model_merged', options),
+                constructSession(pretrained_model_name_or_path, options.model_file_name ?? 'decoder_model_merged', options),
             ]);
 
         } else if (modelType === Seq2SeqModelType) {
@@ -673,15 +677,14 @@ export class PreTrainedModel extends Callable {
                 constructSession(pretrained_model_name_or_path, 'decoder_model_merged', options),
             ]);
 
-        } else if (modelType === EncoderOnlyModelType) {
+        } else { // should be EncoderOnlyModelType
+            if (modelType !== EncoderOnlyModelType) {
+                console.warn(`Model type for ${this.name} not found, assuming encoder-only architecture. Please report this at https://github.com/xenova/transformers.js/issues/new/choose.`)
+            }
             info = await Promise.all([
                 AutoConfig.from_pretrained(pretrained_model_name_or_path, options),
-                constructSession(pretrained_model_name_or_path, 'model', options)
+                constructSession(pretrained_model_name_or_path, options.model_file_name ?? 'model', options)
             ]);
-
-        } else {
-            console.warn('Malformed class definition.', this);
-            throw Error(`Unable to load model: ${pretrained_model_name_or_path}. Please report this bug at https://github.com/xenova/transformers.js/issues/new/choose.`);
         }
 
         // @ts-ignore
@@ -836,12 +839,12 @@ export class PreTrainedModel extends Callable {
     }
 
     /**
-   * This function merges multiple generation configs together to form a final generation config to be used by the model for text generation.
-   * It first creates an empty `GenerationConfig` object, then it applies the model's own `generation_config` property to it. Finally, if a `generation_config` object was passed in the arguments, it overwrites the corresponding properties in the final config with those of the passed config object.
-   *
-   * @param {GenerationConfig} generation_config A `GenerationConfig` object containing generation parameters.
-   * @returns {GenerationConfig} The final generation config object to be used by the model for text generation.
-   */
+     * This function merges multiple generation configs together to form a final generation config to be used by the model for text generation.
+     * It first creates an empty `GenerationConfig` object, then it applies the model's own `generation_config` property to it. Finally, if a `generation_config` object was passed in the arguments, it overwrites the corresponding properties in the final config with those of the passed config object.
+     *
+     * @param {GenerationConfig} generation_config A `GenerationConfig` object containing generation parameters.
+     * @returns {GenerationConfig} The final generation config object to be used by the model for text generation.
+     */
     _get_generation_config(generation_config) {
         // Create empty generation config (contains defaults)
         let gen_config = new GenerationConfig();
@@ -1291,6 +1294,148 @@ export class BertForQuestionAnswering extends BertPreTrainedModel {
 //////////////////////////////////////////////////
 
 //////////////////////////////////////////////////
+// DeBERTa models
+export class DebertaPreTrainedModel extends PreTrainedModel { }
+
+/**
+ * The bare DeBERTa Model transformer outputting raw hidden-states without any specific head on top.
+ */
+export class DebertaModel extends DebertaPreTrainedModel { }
+
+/**
+ * DeBERTa Model with a `language modeling` head on top.
+ */
+export class DebertaForMaskedLM extends DebertaPreTrainedModel {
+    /**
+     * Calls the model on new inputs.
+     *
+     * @param {Object} model_inputs The inputs to the model.
+     * @returns {Promise<MaskedLMOutput>} An object containing the model's output logits for masked language modeling.
+     */
+    async _call(model_inputs) {
+        return new MaskedLMOutput(await super._call(model_inputs));
+    }
+}
+
+/**
+ * DeBERTa Model transformer with a sequence classification/regression head on top (a linear layer on top of the pooled output)
+ */
+export class DebertaForSequenceClassification extends DebertaPreTrainedModel {
+    /**
+     * Calls the model on new inputs.
+     *
+     * @param {Object} model_inputs The inputs to the model.
+     * @returns {Promise<SequenceClassifierOutput>} An object containing the model's output logits for sequence classification.
+     */
+    async _call(model_inputs) {
+        return new SequenceClassifierOutput(await super._call(model_inputs));
+    }
+}
+
+/**
+ * DeBERTa Model with a token classification head on top (a linear layer on top of the hidden-states output) e.g. for Named-Entity-Recognition (NER) tasks.
+ */
+export class DebertaForTokenClassification extends DebertaPreTrainedModel {
+    /**
+     * Calls the model on new inputs.
+     *
+     * @param {Object} model_inputs The inputs to the model.
+     * @returns {Promise<TokenClassifierOutput>} An object containing the model's output logits for token classification.
+     */
+    async _call(model_inputs) {
+        return new TokenClassifierOutput(await super._call(model_inputs));
+    }
+}
+
+/**
+ * DeBERTa Model with a span classification head on top for extractive question-answering tasks like SQuAD (a linear
+ * layers on top of the hidden-states output to compute `span start logits` and `span end logits`).
+ */
+export class DebertaForQuestionAnswering extends DebertaPreTrainedModel {
+    /**
+     * Calls the model on new inputs.
+     *
+     * @param {Object} model_inputs The inputs to the model.
+     * @returns {Promise<QuestionAnsweringModelOutput>} An object containing the model's output logits for question answering.
+     */
+    async _call(model_inputs) {
+        return new QuestionAnsweringModelOutput(await super._call(model_inputs));
+    }
+}
+//////////////////////////////////////////////////
+
+//////////////////////////////////////////////////
+// DeBERTa-v2 models
+export class DebertaV2PreTrainedModel extends PreTrainedModel { }
+
+/**
+ * The bare DeBERTa-V2 Model transformer outputting raw hidden-states without any specific head on top.
+ */
+export class DebertaV2Model extends DebertaV2PreTrainedModel { }
+
+/**
+ * DeBERTa-V2 Model with a `language modeling` head on top.
+ */
+export class DebertaV2ForMaskedLM extends DebertaV2PreTrainedModel {
+    /**
+     * Calls the model on new inputs.
+     *
+     * @param {Object} model_inputs The inputs to the model.
+     * @returns {Promise<MaskedLMOutput>} An object containing the model's output logits for masked language modeling.
+     */
+    async _call(model_inputs) {
+        return new MaskedLMOutput(await super._call(model_inputs));
+    }
+}
+
+/**
+ * DeBERTa-V2 Model transformer with a sequence classification/regression head on top (a linear layer on top of the pooled output)
+ */
+export class DebertaV2ForSequenceClassification extends DebertaV2PreTrainedModel {
+    /**
+     * Calls the model on new inputs.
+     *
+     * @param {Object} model_inputs The inputs to the model.
+     * @returns {Promise<SequenceClassifierOutput>} An object containing the model's output logits for sequence classification.
+     */
+    async _call(model_inputs) {
+        return new SequenceClassifierOutput(await super._call(model_inputs));
+    }
+}
+
+/**
+ * DeBERTa-V2 Model with a token classification head on top (a linear layer on top of the hidden-states output) e.g. for Named-Entity-Recognition (NER) tasks.
+ */
+export class DebertaV2ForTokenClassification extends DebertaV2PreTrainedModel {
+    /**
+     * Calls the model on new inputs.
+     *
+     * @param {Object} model_inputs The inputs to the model.
+     * @returns {Promise<TokenClassifierOutput>} An object containing the model's output logits for token classification.
+     */
+    async _call(model_inputs) {
+        return new TokenClassifierOutput(await super._call(model_inputs));
+    }
+}
+
+/**
+ * DeBERTa-V2 Model with a span classification head on top for extractive question-answering tasks like SQuAD (a linear
+ * layers on top of the hidden-states output to compute `span start logits` and `span end logits`).
+ */
+export class DebertaV2ForQuestionAnswering extends DebertaV2PreTrainedModel {
+    /**
+     * Calls the model on new inputs.
+     *
+     * @param {Object} model_inputs The inputs to the model.
+     * @returns {Promise<QuestionAnsweringModelOutput>} An object containing the model's output logits for question answering.
+     */
+    async _call(model_inputs) {
+        return new QuestionAnsweringModelOutput(await super._call(model_inputs));
+    }
+}
+//////////////////////////////////////////////////
+
+//////////////////////////////////////////////////
 // DistilBert models
 export class DistilBertPreTrainedModel extends PreTrainedModel { }
 export class DistilBertModel extends DistilBertPreTrainedModel { }
@@ -1701,13 +1846,13 @@ export class MT5ForConditionalGeneration extends MT5PreTrainedModel {
     }
 
     /**
-   * Generates the start beams for the given input tokens and output sequence length.
-   *
-   * @param {any[]} inputs The input sequence.
-   * @param {number} numOutputTokens The desired length of the output sequence.
-   * @param {...*} args Additional arguments to pass to the `seq2seqStartBeams` function.
-   * @returns {any[]} An array of `Beam` objects representing the start beams.
-   */
+     * Generates the start beams for the given input tokens and output sequence length.
+     *
+     * @param {any[]} inputs The input sequence.
+     * @param {number} numOutputTokens The desired length of the output sequence.
+     * @param {...*} args Additional arguments to pass to the `seq2seqStartBeams` function.
+     * @returns {any[]} An array of `Beam` objects representing the start beams.
+     */
     getStartBeams(inputs, numOutputTokens, ...args) {
         return seq2seqStartBeams(this, inputs, numOutputTokens);
     }
@@ -1725,16 +1870,16 @@ export class MT5ForConditionalGeneration extends MT5PreTrainedModel {
      * Updates the given beam with the new predicted token.
      * @param {any} beam The beam to update.
      * @param {number} newTokenId The index of the predicted token.
-    */
+     */
     updateBeam(beam, newTokenId) {
         beam.output_token_ids = [...beam.output_token_ids, newTokenId];
     }
 
     /**
-    * Runs the forward pass of the model on the given inputs.
-    * @param {any} model_inputs The model inputs.
-    * @returns {Promise<any>} A Promise that resolves to the model outputs.
-    */
+     * Runs the forward pass of the model on the given inputs.
+     * @param {any} model_inputs The model inputs.
+     * @returns {Promise<any>} A Promise that resolves to the model outputs.
+     */
     async forward(model_inputs) {
         return await seq2seqForward(this, model_inputs);
     }
@@ -2309,8 +2454,121 @@ export class VisionEncoderDecoderModel extends PreTrainedModel {
 //////////////////////////////////////////////////
 // CLIP models
 export class CLIPPreTrainedModel extends PreTrainedModel { }
-export class CLIPModel extends CLIPPreTrainedModel {
 
+/**
+ * CLIP Text and Vision Model with a projection layers on top
+ * 
+ * **Example:** Perform zero-shot image classification with a `CLIPModel`.
+ * 
+ * ```javascript
+ * import { AutoTokenizer, AutoProcessor, CLIPModel, RawImage } from '@xenova/transformers';
+ * 
+ * // Load tokenizer, processor, and model
+ * let tokenizer = await AutoTokenizer.from_pretrained('Xenova/clip-vit-base-patch16');
+ * let processor = await AutoProcessor.from_pretrained('Xenova/clip-vit-base-patch16');
+ * let model = await CLIPModel.from_pretrained('Xenova/clip-vit-base-patch16');
+ * 
+ * // Run tokenization
+ * let texts = ['a photo of a car', 'a photo of a football match']
+ * let text_inputs = tokenizer(texts, { padding: true, truncation: true });
+ * 
+ * // Read image and run processor
+ * let image = await RawImage.read('https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/football-match.jpg');
+ * let image_inputs = await processor(image);
+ * 
+ * // Run model with both text and pixel inputs
+ * let output = await model({ ...text_inputs, ...image_inputs });
+ * // {
+ * //   logits_per_image: Tensor {
+ * //     dims: [ 1, 2 ],
+ * //     data: Float32Array(2) [ 18.579734802246094, 24.31830596923828 ],
+ * //   },
+ * //   logits_per_text: Tensor {
+ * //     dims: [ 2, 1 ],
+ * //     data: Float32Array(2) [ 18.579734802246094, 24.31830596923828 ],
+ * //   },
+ * //   text_embeds: Tensor {
+ * //     dims: [ 2, 512 ],
+ * //     data: Float32Array(1024) [ ... ],
+ * //   },
+ * //   image_embeds: Tensor {
+ * //     dims: [ 1, 512 ],
+ * //     data: Float32Array(512) [ ... ],
+ * //   }
+ * // }
+ * ```
+ */
+export class CLIPModel extends CLIPPreTrainedModel { }
+
+/**
+ * CLIP Text Model with a projection layer on top (a linear layer on top of the pooled output)
+ * 
+ * **Example:** Compute text embeddings with `CLIPTextModelWithProjection`.
+ * 
+ * ```javascript
+ * import { AutoTokenizer, CLIPTextModelWithProjection } from '@xenova/transformers';
+ * 
+ * // Load tokenizer and text model
+ * const tokenizer = await AutoTokenizer.from_pretrained('Xenova/clip-vit-base-patch16');
+ * const text_model = await CLIPTextModelWithProjection.from_pretrained('Xenova/clip-vit-base-patch16');
+ * 
+ * // Run tokenization
+ * let texts = ['a photo of a car', 'a photo of a football match'];
+ * let text_inputs = tokenizer(texts, { padding: true, truncation: true });
+ * 
+ * // Compute embeddings
+ * const { text_embeds } = await text_model(text_inputs);
+ * // Tensor {
+ * //   dims: [ 2, 512 ],
+ * //   type: 'float32',
+ * //   data: Float32Array(1024) [ ... ],
+ * //   size: 1024
+ * // }
+ * ```
+ */
+export class CLIPTextModelWithProjection extends CLIPPreTrainedModel {
+
+    /** @type {PreTrainedModel.from_pretrained} */
+    static async from_pretrained(pretrained_model_name_or_path, options = {}) {
+        // Update default model file name if not provided
+        options.model_file_name ??= 'text_model';
+        return super.from_pretrained(pretrained_model_name_or_path, options);
+    }
+}
+
+/**
+ * CLIP Vision Model with a projection layer on top (a linear layer on top of the pooled output)
+ * 
+ * **Example:** Compute vision embeddings with `CLIPVisionModelWithProjection`.
+ * 
+ * ```javascript
+ * import { AutoProcessor, CLIPVisionModelWithProjection, RawImage} from '@xenova/transformers';
+ * 
+ * // Load processor and vision model
+ * const processor = await AutoProcessor.from_pretrained('Xenova/clip-vit-base-patch16');
+ * const vision_model = await CLIPVisionModelWithProjection.from_pretrained('Xenova/clip-vit-base-patch16');
+ * 
+ * // Read image and run processor
+ * let image = await RawImage.read('https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/football-match.jpg');
+ * let image_inputs = await processor(image);
+ * 
+ * // Compute embeddings
+ * const { image_embeds } = await vision_model(image_inputs);
+ * // Tensor {
+ * //   dims: [ 1, 512 ],
+ * //   type: 'float32',
+ * //   data: Float32Array(512) [ ... ],
+ * //   size: 512
+ * // }
+ * ```
+ */
+export class CLIPVisionModelWithProjection extends CLIPPreTrainedModel {
+    /** @type {PreTrainedModel.from_pretrained} */
+    static async from_pretrained(pretrained_model_name_or_path, options = {}) {
+        // Update default model file name if not provided
+        options.model_file_name ??= 'vision_model';
+        return super.from_pretrained(pretrained_model_name_or_path, options);
+    }
 }
 
 //////////////////////////////////////////////////
@@ -2636,6 +2894,94 @@ export class CodeGenForCausalLM extends CodeGenPreTrainedModel {
 }
 //////////////////////////////////////////////////
 
+
+//////////////////////////////////////////////////
+// LLama models
+
+/**
+ * The bare LLama Model outputting raw hidden-states without any specific head on top.
+ */
+export class LlamaPreTrainedModel extends PreTrainedModel {
+    /**
+     * Creates a new instance of the `LlamaPreTrainedModel` class.
+    * @param {Object} config The model configuration object.
+    * @param {Object} session The ONNX session object.
+    */
+    constructor(config, session) {
+        super(config, session);
+
+        // config doesn't contain pad_token_id, so we assume it is the eos_token_id
+        this.config.pad_token_id = this.config.eos_token_id
+
+        this.num_heads = this.config.num_attention_heads
+        this.num_layers = this.config.num_hidden_layers
+        this.dim_kv = this.config.hidden_size / this.num_heads;
+    }
+}
+/**
+ * The bare LLaMA Model outputting raw hidden-states without any specific head on top.
+ */
+export class LlamaModel extends LlamaPreTrainedModel {
+    /**
+     * Throws an error indicating that the current model class is not compatible with `.generate()`,
+     * as it doesn't have a language model head.
+     * 
+     * @throws {Error} The current model class is not compatible with `.generate()`
+     * 
+     * @param  {...any} args Arguments passed to the generate function
+     * @returns {Promise<any>}
+     */
+    async generate(...args) {
+        throw Error(
+            "The current model class (LlamaModel) is not compatible with `.generate()`, as it doesn't have a language model head. Please use one of the following classes instead: {'LlamaForCausalLM'}"
+        )
+    }
+}
+
+export class LlamaForCausalLM extends LlamaPreTrainedModel {
+
+    /**
+     * Initializes and returns the beam for text generation task
+     * @param {Tensor} inputTokenIds The input token ids.
+     * @param {number} numOutputTokens The number of tokens to be generated.
+     * @param {Tensor} inputs_attention_mask Optional input attention mask.
+     * @returns {any} A Beam object representing the initialized beam.
+     */
+    getStartBeams(inputTokenIds, numOutputTokens, inputs_attention_mask) {
+        return decoderStartBeams(this, inputTokenIds, numOutputTokens, inputs_attention_mask)
+    }
+
+    /**
+     * Runs a single step of the beam search generation algorithm.
+     * @param {any} beam The current beam being generated.
+     * @returns {Promise<any>} The updated beam after a single generation step.
+     */
+    async runBeam(beam) {
+        return await decoderRunBeam(this, beam);
+    }
+
+    /**
+     * Updates the given beam with the new generated token id.
+     * @param {any} beam The Beam object representing the beam.
+     * @param {number} newTokenId The new generated token id to be added to the beam.
+     */
+    updateBeam(beam, newTokenId) {
+        return decoderUpdatebeam(beam, newTokenId);
+    }
+
+    /**
+     * Forward pass for the model.
+     * @param {Object} model_inputs The inputs for the model.
+     * @returns {Promise<any>} The output tensor of the model.
+     */
+    async forward(model_inputs) {
+        return await decoderForward(this, model_inputs);
+    }
+
+}
+//////////////////////////////////////////////////
+
+
 //////////////////////////////////////////////////
 export class ViTPreTrainedModel extends PreTrainedModel { }
 export class ViTForImageClassification extends ViTPreTrainedModel {
@@ -2909,6 +3255,62 @@ export class M2M100ForConditionalGeneration extends M2M100PreTrainedModel {
 }
 //////////////////////////////////////////////////
 
+//////////////////////////////////////////////////
+// Wav2Vec2 models
+export class Wav2Vec2PreTrainedModel extends PreTrainedModel { };
+
+/**
+ * The bare Wav2Vec2 Model transformer outputting raw hidden-states without any specific head on top.
+ * 
+ * **Example:** Load and run an `Wav2Vec2Model` for feature extraction.
+ * 
+ * ```javascript
+ * import { AutoProcessor, read_audio } from '@xenova/transformers';
+ * 
+ * // Read and preprocess audio
+ * const processor = await AutoProcessor.from_pretrained('Xenova/mms-300m');
+ * const audio = await read_audio('https://huggingface.co/datasets/Narsil/asr_dummy/resolve/main/mlk.flac', 16000);
+ * const inputs = await processor(audio);
+ * 
+ * // Run model with inputs
+ * const model = await AutoModel.from_pretrained('Xenova/mms-300m');
+ * const output = await model(inputs);
+ * // {
+ * //   last_hidden_state: Tensor {
+ * //     dims: [ 1, 1144, 1024 ],
+ * //     type: 'float32',
+ * //     data: Float32Array(1171456) [ ... ],
+ * //     size: 1171456
+ * //   }
+ * // }
+ * ```
+ */
+export class Wav2Vec2Model extends Wav2Vec2PreTrainedModel { }
+
+export class Wav2Vec2ForCTC extends Wav2Vec2PreTrainedModel {
+    /**
+     * @param {Object} model_inputs
+     * @param {Tensor} model_inputs.input_values Float values of input raw speech waveform.
+     * @param {Tensor} model_inputs.attention_mask Mask to avoid performing convolution and attention on padding token indices. Mask values selected in [0, 1]
+     */
+    async _call(model_inputs) {
+        return new CausalLMOutput(await super._call(model_inputs));
+    }
+}
+
+export class Wav2Vec2ForSequenceClassification extends Wav2Vec2PreTrainedModel {
+    /**
+     * Calls the model on new inputs.
+     * @param {Object} model_inputs The inputs to the model.
+     * @returns {Promise<SequenceClassifierOutput>} An object containing the model's output logits for sequence classification.
+     */
+    async _call(model_inputs) {
+        return new SequenceClassifierOutput(await super._call(model_inputs));
+    }
+}
+
+
+//////////////////////////////////////////////////
 
 //////////////////////////////////////////////////
 // AutoModels, used to simplify construction of PreTrainedModels
@@ -2940,6 +3342,7 @@ export class PretrainedMixin {
         cache_dir = null,
         local_files_only = false,
         revision = 'main',
+        model_file_name = null,
     } = {}) {
 
         let options = {
@@ -2949,6 +3352,7 @@ export class PretrainedMixin {
             cache_dir,
             local_files_only,
             revision,
+            model_file_name,
         }
         config = await AutoConfig.from_pretrained(pretrained_model_name_or_path, options);
         if (!options.config) {
@@ -2981,6 +3385,8 @@ export class PretrainedMixin {
 
 const MODEL_MAPPING_NAMES_ENCODER_ONLY = new Map([
     ['bert', BertModel],
+    ['deberta', DebertaModel],
+    ['deberta-v2', DebertaV2Model],
     ['mpnet', MPNetModel],
     ['albert', AlbertModel],
     ['distilbert', DistilBertModel],
@@ -2989,6 +3395,7 @@ const MODEL_MAPPING_NAMES_ENCODER_ONLY = new Map([
     ['clip', CLIPModel],
     ['mobilebert', MobileBertModel],
     ['squeezebert', SqueezeBertModel],
+    ['wav2vec2', Wav2Vec2Model],
 
     ['sam', SamModel], // TODO change to encoder-decoder when model is split correctly
 ]);
@@ -3008,10 +3415,13 @@ const MODEL_MAPPING_NAMES_DECODER_ONLY = new Map([
     ['gpt_bigcode', GPTBigCodeModel],
     ['gpt_neo', GPTNeoModel],
     ['codegen', CodeGenModel],
+    ['llama', LlamaModel],
 ]);
 
 const MODEL_FOR_SEQUENCE_CLASSIFICATION_MAPPING_NAMES = new Map([
     ['bert', BertForSequenceClassification],
+    ['deberta', DebertaForSequenceClassification],
+    ['deberta-v2', DebertaV2ForSequenceClassification],
     ['mpnet', MPNetForSequenceClassification],
     ['albert', AlbertForSequenceClassification],
     ['distilbert', DistilBertForSequenceClassification],
@@ -3024,6 +3434,8 @@ const MODEL_FOR_SEQUENCE_CLASSIFICATION_MAPPING_NAMES = new Map([
 
 const MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING_NAMES = new Map([
     ['bert', BertForTokenClassification],
+    ['deberta', DebertaForTokenClassification],
+    ['deberta-v2', DebertaV2ForTokenClassification],
     ['mpnet', MPNetForTokenClassification],
     ['distilbert', DistilBertForTokenClassification],
     ['roberta', RobertaForTokenClassification],
@@ -3044,10 +3456,13 @@ const MODEL_WITH_LM_HEAD_MAPPING_NAMES = new Map([
     ['gpt_bigcode', GPTBigCodeForCausalLM],
     ['gpt_neo', GPTNeoForCausalLM],
     ['codegen', CodeGenForCausalLM],
+    ['llama', LlamaForCausalLM],
 ]);
 
 const MODEL_FOR_MASKED_LM_MAPPING_NAMES = new Map([
     ['bert', BertForMaskedLM],
+    ['deberta', DebertaForMaskedLM],
+    ['deberta-v2', DebertaV2ForMaskedLM],
     ['mpnet', MPNetForMaskedLM],
     ['albert', AlbertForMaskedLM],
     ['distilbert', DistilBertForMaskedLM],
@@ -3059,6 +3474,8 @@ const MODEL_FOR_MASKED_LM_MAPPING_NAMES = new Map([
 
 const MODEL_FOR_QUESTION_ANSWERING_MAPPING_NAMES = new Map([
     ['bert', BertForQuestionAnswering],
+    ['deberta', DebertaForQuestionAnswering],
+    ['deberta-v2', DebertaV2ForQuestionAnswering],
     ['mpnet', MPNetForQuestionAnswering],
     ['albert', AlbertForQuestionAnswering],
     ['distilbert', DistilBertForQuestionAnswering],
@@ -3089,6 +3506,15 @@ const MODEL_FOR_MASK_GENERATION_MAPPING_NAMES = new Map([
     ['sam', SamModel],
 ]);
 
+const MODEL_FOR_CTC_MAPPING_NAMES = new Map([
+    ['wav2vec2', Wav2Vec2ForCTC],
+]);
+
+const MODEL_FOR_AUDIO_CLASSIFICATION_MAPPING_NAMES = new Map([
+    ['wav2vec2', Wav2Vec2ForSequenceClassification],
+]);
+
+
 const MODEL_CLASS_TYPE_MAPPING = [
     [MODEL_MAPPING_NAMES_ENCODER_ONLY, EncoderOnlyModelType],
     [MODEL_MAPPING_NAMES_ENCODER_DECODER, EncoderDecoderModelType],
@@ -3104,15 +3530,18 @@ const MODEL_CLASS_TYPE_MAPPING = [
     [MODEL_FOR_IMAGE_SEGMENTATION_MAPPING_NAMES, EncoderOnlyModelType],
     [MODEL_FOR_OBJECT_DETECTION_MAPPING_NAMES, EncoderOnlyModelType],
     [MODEL_FOR_MASK_GENERATION_MAPPING_NAMES, EncoderOnlyModelType],
+    [MODEL_FOR_CTC_MAPPING_NAMES, EncoderOnlyModelType],
+    [MODEL_FOR_AUDIO_CLASSIFICATION_MAPPING_NAMES, EncoderOnlyModelType],
 ];
 
-for (let [mappings, type] of MODEL_CLASS_TYPE_MAPPING) {
+for (const [mappings, type] of MODEL_CLASS_TYPE_MAPPING) {
     // @ts-ignore
-    for (let [name, model] of mappings.entries()) {
+    for (const model of mappings.values()) {
+        // @ts-ignore
         MODEL_TYPE_MAPPING.set(model.name, type);
-        MODEL_CLASS_MAPPING.set(model.name, name);
     }
 }
+
 
 /**
  * Helper class which is used to instantiate pretrained models with the `from_pretrained` function.
@@ -3246,6 +3675,16 @@ export class AutoModelForObjectDetection extends PretrainedMixin {
 export class AutoModelForMaskGeneration extends PretrainedMixin {
     static MODEL_CLASS_MAPPINGS = [MODEL_FOR_MASK_GENERATION_MAPPING_NAMES];
 }
+
+export class AutoModelForCTC extends PretrainedMixin {
+    static MODEL_CLASS_MAPPINGS = [MODEL_FOR_CTC_MAPPING_NAMES];
+}
+
+export class AutoModelForAudioClassification extends PretrainedMixin {
+    static MODEL_CLASS_MAPPINGS = [MODEL_FOR_AUDIO_CLASSIFICATION_MAPPING_NAMES];
+}
+
+
 //////////////////////////////////////////////////
 
 //////////////////////////////////////////////////
@@ -3326,6 +3765,20 @@ export class QuestionAnsweringModelOutput extends ModelOutput {
     }
 }
 
+
+/**
+ * Base class for causal language model (or autoregressive) outputs.
+ */
+export class CausalLMOutput extends ModelOutput {
+    /**
+     * @param {Object} output The output of the model.
+     * @param {Tensor} output.logits Prediction scores of the language modeling head (scores for each vocabulary token before softmax).
+     */
+    constructor({ logits }) {
+        super();
+        this.logits = logits;
+    }
+}
 
 /**
  * Base class for causal language model (or autoregressive) outputs.
